@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NUVCORE.PCB — Agent JS</title>
+  <style>
+    body { background: #070b12; color: #e2ecf8; font-family: sans-serif; padding: 12px; line-height: 1.45; }
+    .wrap { max-width: 820px; margin: 0 auto; }
+    .card { background: #0e1624; border: 1px solid #1e2d44; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+    h3 { color: #00f0b5; margin: 0 0 10px; font-size: 0.95rem; }
+    label { display: block; font-size: 0.78rem; color: #8396b0; margin-top: 8px; }
+    input, textarea, select {
+      width: 100%; margin-top: 4px; padding: 8px 10px; border-radius: 6px;
+      border: 1px solid #1e2d44; background: #09101b; color: #fff; box-sizing: border-box;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; }
+    .col { flex: 1 1 220px; }
+    .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    button {
+      background: #00f0b5; color: #04130f; border: 0;
+      padding: 9px 13px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 0.84rem;
+    }
+    button.sec { background: #162338; color: #e2ecf8; border: 1px solid #1e2d44; }
+    #chatBox {
+      background: #060a11; border: 1px solid #1e2d44; border-radius: 8px;
+      padding: 10px; height: 220px; overflow-y: auto; margin-bottom: 8px;
+    }
+    .msg { padding: 8px 10px; border-radius: 8px; margin-bottom: 8px; font-size: 0.85rem; white-space: pre-wrap; word-break: break-word; }
+    .msg-u { background: #15263d; border: 1px solid #28456c; }
+    .msg-a { background: #0b1f1c; border: 1px solid rgba(0, 240, 181, 0.35); }
+    .msg-e { background: rgba(255, 77, 109, 0.16); border: 1px solid #ff4d6d; color: #ffb3c1; }
+    pre {
+      background: #060a11; border: 1px solid #1e2d44; padding: 10px;
+      border-radius: 6px; margin-top: 10px; white-space: pre-wrap; word-break: break-word; font-size: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h3>1. Açarlar və Repo Ayarları</h3>
+      <div class="row">
+        <div class="col">
+          <label>Gemini API Key</label>
+          <input id="aiKey" type="password" placeholder="AIza..." />
+        </div>
+        <div class="col">
+          <label>Aktiv Model</label>
+          <select id="modelSelect">
+            <option value="">Açar saxlananda yüklənəcək...</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col">
+          <label>GitHub Token</label>
+          <input id="ghToken" type="password" placeholder="ghp_..." />
+        </div>
+        <div class="col">
+          <label>GitHub Owner</label>
+          <input id="ghOwner" value="al-capilot" />
+        </div>
+        <div class="col">
+          <label>GitHub Repo</label>
+          <input id="ghRepo" value="agent-js" />
+        </div>
+      </div>
+      <div class="btns">
+        <button id="saveKeysBtn" type="button">Açarları Saxla</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>2. Agent Çatı</h3>
+      <div id="chatBox"></div>
+      <textarea id="chatInput" rows="2" placeholder="Mesaj yazın..."></textarea>
+      <div class="btns">
+        <button id="sendChatBtn" type="button">Göndər</button>
+        <button class="sec" id="clearChatBtn" type="button">Təmizlə</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>3. Özünü Genişləndirmə (plugins/*.js + projects.json)</h3>
+      <div class="row">
+        <div class="col">
+          <label>Layihə Adı</label>
+          <input id="projectTitle" placeholder="Robot Layihəsi" />
+        </div>
+        <div class="col">
+          <label>Bacarıq / Modul Adı</label>
+          <input id="skillName" placeholder="storage_skill" />
+        </div>
+      </div>
+      <label>Məqsəd</label>
+      <textarea id="goal" rows="2" placeholder="Yeni bacarığın məqsədi..."></textarea>
+      <div class="btns">
+        <button id="expandBtn" type="button">Bacarıq Qur və Saxla</button>
+      </div>
+      <pre id="out">Hazırdır.</pre>
+    </div>
+  </div>
+
+  <script>
+    window.NUV_SKILLS = window.NUV_SKILLS || {};
+    var MEMORY_KEY = "nuv_agent_chat_history";
+    var chatHistory = [];
+
+    function byId(id) { return document.getElementById(id); }
+    function setOut(t) { if (byId("out")) byId("out").textContent = t; }
+    function addMsg(text, cls) {
+      var box = byId("chatBox");
+      if (!box) return;
+      var div = document.createElement("div");
+      div.className = "msg " + (cls || "msg-a");
+      div.textContent = text;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function getAiKey() { return (byId("aiKey") && byId("aiKey").value.trim()) || localStorage.getItem("nuv_ai_key") || ""; }
+    function getGhToken() { return (byId("ghToken") && byId("ghToken").value.trim()) || localStorage.getItem("nuv_gh_token") || ""; }
+    function getGhOwner() { return (byId("ghOwner") && byId("ghOwner").value.trim()) || localStorage.getItem("nuv_gh_owner") || "al-capilot"; }
+    function getGhRepo() { return (byId("ghRepo") && byId("ghRepo").value.trim()) || localStorage.getItem("nuv_gh_repo") || "agent-js"; }
+    function toBase64(str) { return btoa(unescape(encodeURIComponent(str))); }
+    function fromBase64(b64) { return decodeURIComponent(escape(atob((b64 || "").replace(/\s/g, "")))); }
+
+    function saveMemory() {
+      if (chatHistory.length > 30) chatHistory = chatHistory.slice(-30);
+      try { localStorage.setItem(MEMORY_KEY, JSON.stringify(chatHistory)); } catch (e) {}
+    }
+
+    function loadMemory() {
+      try {
+        var raw = localStorage.getItem(MEMORY_KEY);
+        if (raw) {
+          var parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) chatHistory = parsed;
+        }
+      } catch (e) {}
+    }
+
+    async function fetchAvailableModels(apiKey) {
+      var r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=" + encodeURIComponent(apiKey));
+      var data = await r.json();
+      if (!r.ok) throw new Error((data.error && data.error.message) || "Model xətası");
+      var usable = (data.models || []).filter(function (m) {
+        return (m.supportedGenerationMethods || []).indexOf("generateContent") !== -1;
+      }).map(function (m) { return m.name.replace(/^models\//, ""); });
+      usable.sort(function (a, b) { return (/flash/i.test(a) ? 0 : 1) - (/flash/i.test(b) ? 0 : 1); });
+      var sel = byId("modelSelect");
+      if (sel && usable.length) {
+        sel.innerHTML = usable.map(function (m) { return '<option value="' + m + '">' + m + '</option>'; }).join("");
+        sel.value = localStorage.getItem("nuv_ai_model") || usable[0];
+      }
+      return usable;
+    }
+
+    function saveSettings() {
+      var ai = getAiKey(), gh = getGhToken(), owner = getGhOwner(), repo = getGhRepo();
+      localStorage.setItem("nuv_ai_key", ai);
+      localStorage.setItem("nuv_gh_token", gh);
+      localStorage.setItem("nuv_gh_owner", owner);
+      localStorage.setItem("nuv_gh_repo", repo);
+      if (!ai) return addMsg("XƏTA: Gemini API Key daxil edin!", "msg-e");
+      fetchAvailableModels(ai).then(function () {
+        var activeModel = (byId("modelSelect") && byId("modelSelect").value) || "";
+        if (activeModel) localStorage.setItem("nuv_ai_model", activeModel);
+        addMsg("UĞURLU: Açarlar saxlandı (" + activeModel + ")", "msg-a");
+        if (gh) loadAllPluginsFromGitHub();
+      }).catch(function (e) { addMsg("XƏTA: " + e.message, "msg-e"); });
+    }
+
+    async function githubPutFile(path, content, msg) {
+      var token = getGhToken(), owner = getGhOwner(), repo = getGhRepo();
+      if (!token) throw new Error("GitHub Token boşdur!");
+      var url = "https://api.github.com/repos/" + owner + "/" + repo + "/contents/" + path;
+      var headers = { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json", "Content-Type": "application/json" };
+      var sha = null, check = await fetch(url, { headers: headers });
+      if (check.ok) sha = (await check.json()).sha;
+      var body = { message: msg, content: toBase64(content) };
+      if (sha) body.sha = sha;
+      var put = await fetch(url, { method: "PUT", headers: headers, body: JSON.stringify(body) });
+      if (!put.ok) throw new Error("GitHub xətası: " + put.status);
+    }
+
+    async function loadAllPluginsFromGitHub() {
+      var token = getGhToken(), owner = getGhOwner(), repo = getGhRepo();
+      if (!token) return;
+      var headers = { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json" };
+      try {
+        var r = await fetch("https://api.github.com/repos/" + owner + "/" + repo + "/contents/projects.json", { headers: headers });
+        if (!r.ok) return;
+        var projects = JSON.parse(fromBase64((await r.json()).content));
+        var count = 0;
+        for (var i = 0; i < projects.length; i++) {
+          if (!projects[i] || !projects[i].file) continue;
+          var fr = await fetch("https://api.github.com/repos/" + owner + "/" + repo + "/contents/" + projects[i].file, { headers: headers });
+          if (fr.ok) {
+            var code = fromBase64((await fr.json()).content);
+            try { new Function(code)(); count++; } catch (e) {}
+          }
+        }
+        if (count) addMsg("SİSTEM: " + count + " avtonom bacarıq yükləndi: " + Object.keys(window.NUV_SKILLS).join(", "), "msg-a");
+      } catch (e) {}
+    }
+
+    async function expandProjectAndSkill() {
+      var aiKey = getAiKey();
+      if (!aiKey) return addMsg("XƏTA: Gemini API Key yoxdur!", "msg-e");
+      var title = (byId("projectTitle") && byId("projectTitle").value.trim()) || "Robot Layihəsi";
+      var skill = ((byId("skillName") && byId("skillName").value.trim()) || ("skill_" + Date.now())).replace(/[^a-zA-Z0-9_-]/g, "_");
+      var goal = (byId("goal") && byId("goal").value.trim()) || "Avtonom modul";
+      var model = (byId("modelSelect") && byId("modelSelect").value) || localStorage.getItem("nuv_ai_model") || "gemini-2.5-flash";
+      setOut("Kod yazılır: " + skill + ".js ...");
+      try {
+        var prompt = "Yalnız xalis JavaScript kodu yaz (markdown yazma). Format: window.NUV_SKILLS = window.NUV_SKILLS || {}; window.NUV_SKILLS['" + skill + "'] = async function(params) { return { status: 'ok', info: '" + goal.replace(/'/g, "\\'") + "' }; }; Məqsəd: " + goal;
+        var r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(aiKey), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }] })
+        });
+        var d = await r.json();
+        if (!r.ok) throw new Error((d.error && d.error.message) || "API xətası");
+        var code = d.candidates[0].content.parts[0].text.replace(/```javascript|```js|```/g, "").trim();
+        new Function(code)();
+        await githubPutFile("plugins/" + skill + ".js", code, "add " + skill);
+        var projects = [], owner = getGhOwner(), repo = getGhRepo();
+        var pc = await fetch("[https://api.github.com/repos/](https://api.github.com/repos/)" + owner + "/" + repo + "/contents/projects.json", { headers: { "Authorization": "Bearer " + getGhToken(), "Accept": "application/vnd.github+json" } });
+        if (pc.ok) try { projects = JSON.parse(fromBase64((await pc.json()).content)); } catch (e) {}
+        projects.push({ title: title, skill: skill, goal: goal, file: "plugins/" + skill + ".js" });
+        await githubPutFile("projects.json", JSON.stringify(projects, null, 2), "update projects.json");
+        setOut("TAMAMLANDI: plugins/" + skill + ".js\n" + code);
+        addMsg("UĞURLU: '" + skill + ".js' yazıldı və aktivləşdirildi!", "msg-a");
+      } catch (e) { setOut("XƏTA: " + e.message); addMsg("XƏTA: " + e.message, "msg-e"); }
+    }
+
+    var agentTools = [{
+      functionDeclarations: [
+        { name: "build_skill", description: "Yeni modul və ya bacarıq kodu yaradır.", parameters: { type: "OBJECT", properties: { projectTitle: { type: "STRING" }, skillName: { type: "STRING" }, goal: { type: "STRING" } }, required: ["projectTitle", "skillName", "goal"] } },
+        { name: "run_skill", description: "Mövcud bacarığı işə salır.", parameters: { type: "OBJECT", properties: { skillName: { type: "STRING" }, paramsJson: { type: "STRING" } }, required: ["skillName"] } },
+        { name: "reply", description: "Sual vermədən birbaşa cavab verir.", parameters: { type: "OBJECT", properties: { text: { type: "STRING" } }, required: ["text"] } }
+      ]
+    }];
+
+    async function sendChat() {
+      var input = byId("chatInput"), text = input ? input.value.trim() : "";
+      if (!text) return;
+      var aiKey = getAiKey();
+      if (!aiKey) return addMsg("XƏTA: Gemini API Key daxil edin!", "msg-e");
+      addMsg(text, "msg-u");
+      input.value = "";
+      chatHistory.push({ role: "user", parts: [{ text: text }] });
+      saveMemory();
+      var skills = Object.keys(window.NUV_SKILLS);
+      var model = (byId("modelSelect") && byId("modelSelect").value) || localStorage.getItem("nuv_ai_model") || "gemini-2.5-flash";
+      var sys = "Sən NUVCORE.PCB icraçı agentsən. HEÇ VAXT sual vermə. Yaddaşı qoru. Aktiv bacarıqlar: [" + skills.join(", ") + "].";
+      try {
+        var r = await fetch("[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(aiKey), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: chatHistory, tools: agentTools, toolConfig: { functionCallingConfig: { mode: "ANY" } }, systemInstruction: { parts: [{ text: sys }] } })
+        });
+        var d = await r.json();
+        if (!r.ok) throw new Error((d.error && d.error.message) || "API xətası");
+        var parts = d.candidates[0].content.parts || [];
+        for (var i = 0; i < parts.length; i++) {
+          if (parts[i].functionCall) {
+            var fn = parts[i].functionCall.name, args = parts[i].functionCall.args || {};
+            if (fn === "build_skill") {
+              if (byId("projectTitle")) byId("projectTitle").value = args.projectTitle || "";
+              if (byId("skillName")) byId("skillName").value = args.skillName || "";
+              if (byId("goal")) byId("goal").value = args.goal || "";
+              chatHistory.push({ role: "model", parts: [{ text: "[build_skill: " + (args.skillName || "") + "]" }] });
+              saveMemory();
+              await expandProjectAndSkill();
+            } else if (fn === "run_skill") {
+              var res = window.NUV_SKILLS[args.skillName] ? await window.NUV_SKILLS[args.skillName](JSON.parse(args.paramsJson || "{}")) : "Tapılmadı";
+              var outText = "İCRA NƏTİCƏSİ (" + args.skillName + "): " + JSON.stringify(res);
+              addMsg(outText, "msg-a");
+              chatHistory.push({ role: "model", parts: [{ text: outText }] });
+              saveMemory();
+            } else if (fn === "reply") {
+              addMsg(args.text, "msg-a");
+              chatHistory.push({ role: "model", parts: [{ text: args.text }] });
+              saveMemory();
+            }
+          }
+        }
+      } catch (e) { addMsg("XƏTA: " + e.message, "msg-e"); }
+    }
+
+    window.addEventListener("DOMContentLoaded", function () {
+      loadMemory();
+      if (byId("aiKey")) byId("aiKey").value = localStorage.getItem("nuv_ai_key") || "";
+      if (byId("ghToken")) byId("ghToken").value = localStorage.getItem("nuv_gh_token") || "";
+      if (byId("ghOwner") && localStorage.getItem("nuv_gh_owner")) byId("ghOwner").value = localStorage.getItem("nuv_gh_owner");
+      if (byId("ghRepo") && localStorage.getItem("nuv_gh_repo")) byId("ghRepo").value = localStorage.getItem("nuv_gh_repo");
+      if (byId("saveKeysBtn")) byId("saveKeysBtn").addEventListener("click", saveSettings);
+      if (byId("sendChatBtn")) byId("sendChatBtn").addEventListener("click", sendChat);
+      if (byId("clearChatBtn")) byId("clearChatBtn").addEventListener("click", function () { if (byId("chatBox")) byId("chatBox").innerHTML = ""; });
+      if (byId("expandBtn")) byId("expandBtn").addEventListener("click", expandProjectAndSkill);
+      if (byId("chatInput")) byId("chatInput").addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+      });
+    });
+  </script>
+</body>
+</html>
